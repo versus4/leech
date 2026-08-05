@@ -1,0 +1,29 @@
+CHANGELOG
+
+Added:
+  - Trash for deletes and overwrites (.leech-trash/), with restore_file
+  - Permission gate on every tool call (auto / ask / readonly)
+  - Hard-deny list for catastrophic commands
+  - Mid-stream resume with overlap de-duplication
+  - Stale-write guard
+  - Tool dialects: <tool_call>, <function_calls>, <invoke>, bare JSON
+  - catalog.py -- roster and alias validation, model blacklist
+
+Changed:
+  - Model roster: dropped 11 retired, added Opus 5, GPT-5.4,
+    Gemini 3.6 Flash, Grok 4.5;
+  - Retry logic split by failure type
+  - Per-model idle timeouts (150s base, 300s reasoning)
+  - edit_file and run_command removed from one-line routing
+  - Classification defaults to the 'fast' model
+
+Fixed:
+  - Clean socket close read as truncation
+  - Whole-file rewrite silently truncating files
+  - Keyword fallback routing destructive operations
+  - Workspace escape via prefix match
+  - Backoff cap applied before jitter
+  - Token mint race between coroutines sharing an account
+  - Pool counting stale accounts as ready
+  - Partial tool calls executing after a dropped stream
+  - Classifier folding unknown argument keys into the previous value

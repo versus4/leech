@@ -17,14 +17,10 @@ from .email_gen import gen_email, gen_password
 
 log = logging.getLogger("leech")
 
-# --- cloakbrowser launch -----------------------------------------------------
-# cloakbrowser is a drop-in Playwright replacement; the ONLY difference from
-# vanilla playwright is the launcher (+ the humanize flag). If the import path
-# differs in your installed version, THIS is the one place you fix it.
 try:
-    from cloakbrowser import async_playwright          # primary: stealth chromium
+    from cloakbrowser import async_playwright
     USING_CLOAK = True
-except ImportError:                                     # fallback: stock playwright
+except ImportError:
     from playwright.async_api import async_playwright
     USING_CLOAK = False
     log.warning("cloakbrowser not installed -> falling back to stock playwright (NO stealth)")
@@ -74,8 +70,6 @@ async def _switch_model(page, model_key: str):
 async def _signup(page) -> str:
     sel = config.SELECTORS
     await page.click(sel["signup_button"])
-    # use.ai's auth modal is two-step: the email field only appears AFTER clicking
-    # "continue with email". Skip silently if the selector isn't configured.
     if _ok("email_reveal"):
         try:
             await page.click(sel["email_reveal"])
@@ -84,7 +78,7 @@ async def _signup(page) -> str:
     for attempt in range(1, config.SIGNUP_MAX_RETRIES + 1):
         email, pw = gen_email(), gen_password()
         await page.fill(sel["email_input"], email)
-        if _ok("password_input"):           # passwordless sites (use.ai) skip this
+        if _ok("password_input"):
             await page.fill(sel["password_input"], pw)
         await page.click(sel["signup_submit"])
         if _ok("email_taken_error"):
@@ -118,7 +112,6 @@ async def _ask(page, prompt: str) -> str:
     return (await blocks[-1].inner_text()).strip() if blocks else ""
 
 
-# --- the three paths ---------------------------------------------------------
 async def _prompt_with_state(state_path: str, model: str, prompt: str, proxy=None) -> str:
     """WARM path: reuse a banked session, skip signup entirely."""
     if not state_path:
@@ -145,7 +138,7 @@ async def _cold_run(model: str, prompt: str) -> str:
     will not complete headless against use.ai).
     """
     async with async_playwright() as p:
-        browser, ctx = await _new_context(p)        # proxy="auto"
+        browser, ctx = await _new_context(p)
         try:
             page = await ctx.new_page()
             await page.goto(config.TARGET_URL, wait_until="domcontentloaded")
@@ -254,12 +247,12 @@ async def stream_messages(model: str, messages: list, acct: dict | None = None):
         except Exception as e:
             health.H.send(False, "direct", e)
             if produced:
-                return                          # client already has partial output
+                return
             if not getattr(config, "BROWSER_FALLBACK_ENABLED", False):
                 log.warning("direct WS stream failed: %r", e)
                 raise RuntimeError(f"model runner unavailable: direct WS failed ({e!r})") from e
             log.warning("direct WS stream failed (%r) -> browser fallback", e)
 
-    reply = await _cold_run(model, _flatten_messages(messages))   # non-streaming fallback
+    reply = await _cold_run(model, _flatten_messages(messages))
     health.H.send(True, "cold")
     yield reply

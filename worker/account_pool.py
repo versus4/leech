@@ -53,18 +53,26 @@ class AccountPool:
     async def acquire(self) -> dict:
         """A warm account if one is ready (and not stale); otherwise sign up inline."""
         q = self._queue()
+        dropped = 0
         while not q.empty():
             try:
                 a = q.get_nowait()
             except asyncio.QueueEmpty:
                 break
             if time.time() - a.get("_born", 0) < self.ttl:
-                return a               # fresh enough -> use it
-            # stale -> drop and try the next one
-        return await create_account()  # drained -> ~1s inline signup
+                return a
+            dropped += 1
+        if dropped:
+            log.info("dropped %d stale account(s); pool will refill", dropped)
+        return await create_account()
 
     def ready(self) -> int:
-        return self._q.qsize() if self._q else 0
+        """Only accounts that would actually survive acquire()'s TTL check."""
+        if not self._q:
+            return 0
+        now = time.time()
+        return sum(1 for a in self._q._queue
+                   if now - a.get("_born", 0) < self.ttl)
 
 
 POOL = AccountPool()

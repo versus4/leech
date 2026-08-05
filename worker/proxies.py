@@ -79,7 +79,7 @@ def has_proxies() -> bool:
 def next_proxy():
     """Return the next proxy dict (playwright format) or None if none configured."""
     if config.PROXY_TOR:
-        return {"server": config.TOR_SOCKS}      # circuit is rotated via renew_tor_circuit()
+        return {"server": config.TOR_SOCKS}
     if not _loaded:
         _load()
     if not _pool:
@@ -127,7 +127,7 @@ def to_url(proxy):
     """playwright proxy dict -> a proxy URL string (for httpx). None stays None."""
     if not proxy:
         return None
-    server = proxy["server"]                       # scheme://host:port
+    server = proxy["server"]
     user, pw = proxy.get("username"), proxy.get("password")
     if user:
         scheme, host = server.split("://", 1)

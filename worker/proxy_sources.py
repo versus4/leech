@@ -25,7 +25,6 @@ try:
 except ImportError:
     httpx = None
 
-# public, no-auth free proxy lists
 SOURCES = [
     "https://api.proxyscrape.com/v4/free-proxy-list/get?request=display_proxies&proxy_format=ipport&format=text",
     "https://raw.githubusercontent.com/TheSpeedX/PROXY-List/master/http.txt",
@@ -33,7 +32,7 @@ SOURCES = [
     "https://raw.githubusercontent.com/monosans/proxy-list/main/proxies/http.txt",
 ]
 
-TEST_URL = "http://httpbin.org/ip"   # cheap "what's my IP" echo to confirm a proxy works
+TEST_URL = "http://httpbin.org/ip"
 
 
 async def _fetch_list(client, url):
@@ -65,7 +64,7 @@ async def refresh(limit: int = 2000, concurrency: int = 200):
 
     async with httpx.AsyncClient() as c:
         lists = await asyncio.gather(*[_fetch_list(c, s) for s in SOURCES])
-    candidates = list(dict.fromkeys(p for lst in lists for p in lst))   # dedupe, keep order
+    candidates = list(dict.fromkeys(p for lst in lists for p in lst))
     if limit:
         candidates = candidates[:limit]
     log.info("fetched %d unique candidates, testing %d...", len(candidates), len(candidates))

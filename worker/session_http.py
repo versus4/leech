@@ -55,26 +55,30 @@ async def create_account(proxy: str | None = None) -> dict:
 
 
 async def get_ws_tokens(acct: dict, proxy: str | None = None) -> tuple[str, str]:
-    cached = acct.get("_ws_tokens")
-    if cached and time.time() < cached.get("expires_at", 0) - 30:
-        return cached["token"], cached["app_token"]
-    hdrs = {"Cookie": acct["cookie_header"], "Origin": "https://use.ai",
-            "Referer": "https://use.ai/", "User-Agent": _UA}
-    async with httpx.AsyncClient(timeout=30, headers=hdrs, proxy=proxy) as c:
-        r, r2 = await asyncio.gather(
-            c.get(f"{config.AUTH_BASE}/token"),
-            c.post(f"{config.AUTH_BASE}/app-attestation",
-                   json={"priorToken": (cached or {}).get("app_token", "")}),
-        )
-        r.raise_for_status()
-        r2.raise_for_status()
-        token = r.json().get("token", "")
-        attestation = r2.json()
-        app_token = attestation.get("token", "")
-        expires_in = float(attestation.get("expiresIn") or 300)
-    if not token or not app_token:
-        raise RuntimeError("token/app-attestation mint returned empty")
-    now = time.time()
-    acct["_ws_tokens"] = {"token": token, "app_token": app_token,
-                          "at": now, "expires_at": now + max(30, expires_in)}
-    return token, app_token
+    lock = acct.get("_ws_lock")
+    if lock is None:
+        lock = acct["_ws_lock"] = asyncio.Lock()
+    async with lock:
+        cached = acct.get("_ws_tokens")
+        if cached and time.time() < cached.get("expires_at", 0) - 30:
+            return cached["token"], cached["app_token"]
+        hdrs = {"Cookie": acct["cookie_header"], "Origin": "https://use.ai",
+                "Referer": "https://use.ai/", "User-Agent": _UA}
+        async with httpx.AsyncClient(timeout=30, headers=hdrs, proxy=proxy) as c:
+            r, r2 = await asyncio.gather(
+                c.get(f"{config.AUTH_BASE}/token"),
+                c.post(f"{config.AUTH_BASE}/app-attestation",
+                       json={"priorToken": (cached or {}).get("app_token", "")}),
+            )
+            r.raise_for_status()
+            r2.raise_for_status()
+            token = r.json().get("token", "")
+            attestation = r2.json()
+            app_token = attestation.get("token", "")
+            expires_in = float(attestation.get("expiresIn") or 300)
+        if not token or not app_token:
+            raise RuntimeError("token/app-attestation mint returned empty")
+        now = time.time()
+        acct["_ws_tokens"] = {"token": token, "app_token": app_token,
+                              "at": now, "expires_at": now + max(30, expires_in)}
+        return token, app_token

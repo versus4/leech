@@ -13,6 +13,7 @@ out of the hot path.
 import asyncio
 import json
 import logging
+import os
 import re
 import time
 import uuid
@@ -33,9 +34,6 @@ logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("backend")
 app = FastAPI(title="WMan")
 
-# The /v1 endpoints are meant to be hit from other origins ("people build it
-# themselves"), so allow cross-origin calls. The bundled frontend is same-origin
-# (served from /) or uses the Vite dev proxy, so this only matters for API clients.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -53,10 +51,29 @@ if (FRONTEND_DIST / "assets").exists():
 
 
 @app.on_event("startup")
+async def _validate_roster():
+    from worker import catalog
+    problems = catalog.validate()
+    log.info("model roster: %d models, default=%s%s", len(config.MODELS),
+             config.DEFAULT_MODEL,
+             "" if not problems else " (%d issue(s) fixed, see warnings)" % len(problems))
+
+
+@app.on_event("startup")
+async def _configure_permissions():
+    from worker import permissions
+    mode = os.environ.get("LEECH_PERMISSION_MODE", permissions.MODE_AUTO)
+    permissions.set_mode(mode)
+    if permissions.get_mode() == permissions.MODE_AUTO:
+        log.warning("permissions: AUTO -- tool calls run unattended (hard-denied "
+                    "commands still blocked; deletes/overwrites go to .leech-trash). "
+                    "Set LEECH_PERMISSION_MODE=readonly to refuse all writes.")
+    else:
+        log.info("permissions: %s", permissions.get_mode())
+
+
+@app.on_event("startup")
 async def _start_prewarmer():
-    # The headless WS path signs up its own account per request, so the browser
-    # harvester/bank isn't needed. Instead start the warm ACCOUNT POOL so signup
-    # stays out of the hot path. Only run the browser prewarmer for the fallback.
     if getattr(config, "DIRECT_WS_ENABLED", False):
         from worker.account_pool import POOL
         POOL.start()
@@ -75,7 +92,6 @@ async def _start_prewarmer():
     asyncio.create_task(loop())
 
 
-# --- pages / status ----------------------------------------------------------
 @app.get("/", response_class=HTMLResponse)
 async def index():
     if FRONTEND_INDEX.exists():
@@ -134,7 +150,6 @@ async def health_status():
     return health.H.snapshot(bank.count_fresh())
 
 
-# --- stateful chat (frontend) ------------------------------------------------
 MARKDOWN_IMAGE_RE = re.compile(r"!\[([^\]]*)\]\(([^)\s]+)(?:\s+\"[^\"]*\")?\)")
 IMAGE_URL_RE = re.compile(
     r"(https?://[^\s<>()\"]+(?:\.(?:png|jpe?g|webp|gif|avif)(?:\?[^\s<>()\"]*)?"
@@ -204,7 +219,7 @@ async def chat(req: Request):
     model = body.get("model", "default")
     session_id = body.get("sessionId") or str(uuid.uuid4())
 
-    messages = context.build_messages(session_id, message)   # role-tagged history + new turn
+    messages = context.build_messages(session_id, message)
     context.append(session_id, "user", message)
 
     async def gen():
@@ -212,13 +227,13 @@ async def chat(req: Request):
         try:
             async for delta in run_guarded_gen(lambda: stream_messages(model, messages)):
                 parts.append(delta)
-                yield _sse(delta)               # forward each token the instant it lands
+                yield _sse(delta)
         except Exception as exc:
             log.warning("chat stream failed: %s: %s", type(exc).__name__, exc)
             if not parts:
                 yield _sse(f"Backend error contacting the model runner ({type(exc).__name__}).")
         reply = "".join(parts).strip()
-        context.append(session_id, "assistant", reply)   # full reply -> multi-turn memory
+        context.append(session_id, "assistant", reply)
         image = _extract_image(reply)
         if image:
             yield _sse_payload({"type": "image", "image": image})
@@ -227,7 +242,6 @@ async def chat(req: Request):
     return StreamingResponse(gen(), media_type="text/event-stream")
 
 
-# --- stateless: simple -------------------------------------------------------
 @app.post("/v1/chat")
 async def v1_chat(req: Request):
     body = await req.json()
@@ -249,7 +263,6 @@ async def agent_run(req: Request):
     return JSONResponse(result)
 
 
-# --- stateless: OpenAI-compatible -------------------------------------------
 def _openai_block(reply: str, model: str) -> dict:
     return {
         "id": "chatcmpl-" + uuid.uuid4().hex[:24],

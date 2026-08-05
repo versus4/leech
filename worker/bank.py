@@ -12,7 +12,7 @@ import time
 
 from . import config
 
-_lock = threading.Lock()        # sqlite + our claim() need to be serialized
+_lock = threading.Lock()
 
 
 def _open() -> sqlite3.Connection:
@@ -29,7 +29,6 @@ def _open() -> sqlite3.Connection:
             created    REAL,
             used_at    REAL
         )""")
-    # migrate older dbs that predate the proxy column
     try:
         c.execute("ALTER TABLE accounts ADD COLUMN proxy TEXT")
     except sqlite3.OperationalError:

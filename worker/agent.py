@@ -1,33 +1,31 @@
+import inspect
 import json
 import re
 
-from . import direct
-from .tools import TOOLS, _resolve
+from . import classify, direct, permissions
+from .tools import TOOLS, _resolve, note_content
 
 TOOL_DOCS = (
     "You are a coding agent working inside a project folder. You have REAL tools that "
     "execute on disk. To use one, output EXACTLY this and nothing else:\n"
     '<tool>{"name": "<tool>", "args": {...}}</tool>\n'
     "then stop and wait for the result (it comes back as \"Tool result: ...\").\n\n"
-    "Tools:\n"
-    "read_file(path)\n"
-    "write_file(path, content)\n"
-    "append_file(path, content)\n"
-    "edit_file(path, old_string, new_string, replace_all?)\n"
-    "delete_file(path)\n"
-    "list_dir(path, depth?)\n"
-    "grep_search(pattern, path?, case_insensitive?)\n"
-    "move_file(path, new_path)\n"
-    "copy_file(path, new_path)\n"
-    "make_dir(path)\n"
-    "glob_files(pattern, path?)\n"
-    "run_command(command, timeout?)\n\n"
+    "Tools:\n%s\n\n"
     "Rules: one tool call per message. In JSON strings a newline is \\n and a quote is "
     '\\". Never say you cannot access files -- you can, via a tool call. When the task is '
     "done, reply in plain text with a short summary."
-)
+) % "\n".join(
+    "%s(%s)" % (n, ", ".join(
+        k if p.default is inspect.Parameter.empty else k + "?"
+        for k, p in inspect.signature(f).parameters.items()))
+    for n, f in TOOLS.items())
 
-_TOOL_TAG = re.compile(r"<tool>\s*(\{.*?\})\s*</tool>", re.DOTALL)
+_TOOL_TAG = re.compile(
+    r"<(?:tool|tool_call|function_calls|invoke)>\s*(\{.*?\})\s*"
+    r"</(?:tool|tool_call|function_calls|invoke)>", re.DOTALL)
+_BARE_CALL = re.compile(
+    r'^\s*(\{\s*"name"\s*:\s*"[a-z_]+"\s*,\s*"args"\s*:\s*\{.*?\}\s*\})\s*$',
+    re.DOTALL | re.MULTILINE)
 _FENCE = re.compile(r"```([^\n]*)\n(.*?)```", re.DOTALL)
 _FILE_TOKEN = re.compile(r"([A-Za-z0-9_.\-/]+\.[A-Za-z][A-Za-z0-9]{0,6})")
 _PATH_IN = re.compile(r"(?<![\w@])([A-Za-z0-9_.\-/]+\.[A-Za-z][A-Za-z0-9]{0,6})")
@@ -77,7 +75,11 @@ def _escape_controls(s):
 
 def _parse_tool_calls(text):
     calls = []
-    for m in _TOOL_TAG.finditer(text):
+    seen = set()
+    for m in list(_TOOL_TAG.finditer(text)) + list(_BARE_CALL.finditer(text)):
+        if m.start() in seen:
+            continue
+        seen.add(m.start())
         raw = m.group(1)
         obj = None
         try:
@@ -92,14 +94,43 @@ def _parse_tool_calls(text):
     return calls
 
 
+def _fast(msg):
+    """Zero-ambiguity shortcuts only -- a latency cache in front of the classifier.
+    Everything else is left to classify.detect(), which handles any language."""
+    v = (msg or "").strip()
+    if not v or "\n" in v:
+        return None
+    low = v.lower()
+    if low in ("ls", "dir", "tree", "list files"):
+        return "list_dir", {"path": ".", "depth": 2}
+    if _fileexists(v):
+        return "read_file", {"path": v}
+    rn = _RUN.match(v)
+    if rn and re.match(r"^(?:npm|npx|pnpm|yarn|node|python|py|pytest|pip|git|go|cargo|make|ruff|black|eslint|tsc)\b",
+                       rn.group(1).strip(), re.I):
+        return "run_command", {"command": rn.group(1).strip()}
+    return None
+
+
+_DESTRUCTIVE_FALLBACK = {"delete_file", "move_file", "copy_file", "run_command",
+                         "write_file", "append_file", "edit_file"}
+
+
 def _dispatch(msg):
+    out = _dispatch_raw(msg)
+    if out and out[0] in _DESTRUCTIVE_FALLBACK:
+        return None
+    return out
+
+
+def _dispatch_raw(msg):
     v = (msg or "").strip()
     if not v or _NEGATION.search(v):
         return None
     paths = []
     for m in _PATH_IN.finditer(v):
         p = m.group(1)
-        if p not in paths and "://" not in p:
+        if p not in paths and "://" not in p and not p.startswith("/"):
             paths.append(p)
     quoted = [m.group(2) for m in _QUOTED.finditer(v)]
     low = v.lower()
@@ -204,6 +235,7 @@ async def _transform(path, task, model):
         content = _resolve(path).read_text(encoding="utf-8", errors="replace")
     except Exception:
         return None
+    note_content(path, content)
     lang = path.rsplit(".", 1)[-1] if "." in path else ""
     prompt = (
         "Here is the current content of %s:\n```%s\n%s```\n\n"
@@ -220,9 +252,31 @@ async def _transform(path, task, model):
     if not m:
         return None
     new = m.group(2)
-    if "<tool>" in new or len(new) < max(4, len(content) // 4):
+    if not _is_full_rewrite(content, new):
         return None
     return new if new.endswith("\n") else new + "\n"
+
+
+_ELLIPSIS = re.compile(r"^\s*(?:#|//|/\*|<!--|--)?\s*\.\.\.\s*(?:[A-Za-z][^\n]*)?$", re.M)
+
+
+def _is_full_rewrite(old, new):
+    if not new.strip():
+        return False
+    for tag in ("<tool>", "<tool_call>", "<function_calls>", "<invoke>"):
+        if tag in new:
+            return False
+    if _ELLIPSIS.search(new):
+        return False
+    if len(new) < max(4, int(len(old) * 0.6)):
+        return False
+    old_lines = [l.strip() for l in old.splitlines() if l.strip()]
+    new_lines = {l.strip() for l in new.splitlines() if l.strip()}
+    if len(old_lines) >= 12:
+        kept = sum(1 for l in old_lines if l in new_lines)
+        if kept < len(old_lines) * 0.5:
+            return False
+    return True
 
 
 def _harvest(text, requested):
@@ -256,6 +310,18 @@ def _harvest(text, requested):
     return out
 
 
+def _execute(name, args):
+    """The single point where a tool actually runs. Routing (regex, classifier, or
+    the model's own <tool> call) only ever proposes -- everything is gated here, so
+    no new routing path can bypass the check by forgetting to ask."""
+    if permissions.check(name, args) == permissions.DENY:
+        return "Denied: %s was not run (%s)." % (name, permissions.describe(name, args))
+    try:
+        return TOOLS[name](**args)
+    except Exception as e:
+        return "Error: %s" % e
+
+
 async def run(message, model=None, max_steps=12):
     model = model or "default"
     events = []
@@ -263,10 +329,14 @@ async def run(message, model=None, max_steps=12):
     def emit(kind, **kw):
         events.append({"type": kind, **kw})
 
-    pre = _dispatch(message)
+    pre = _fast(message)
+    if not pre and classify.ENABLED:
+        pre = await classify.detect(message, model)
+    elif not pre:
+        pre = _dispatch(message)
     if pre:
         name, args = pre
-        result = TOOLS[name](**args)
+        result = _execute(name, args)
         emit("tool", name=name, args=args, result=result)
         return {"text": "Done: %s" % result, "events": events}
 
@@ -274,7 +344,7 @@ async def run(message, model=None, max_steps=12):
     if target:
         new = await _transform(target, message, model)
         if new is not None:
-            result = TOOLS["write_file"](target, new)
+            result = _execute("write_file", {"path": target, "content": new})
             emit("tool", name="write_file", args={"path": target}, result=result)
             return {"text": "Edited %s." % target, "events": events}
 
@@ -295,14 +365,11 @@ async def run(message, model=None, max_steps=12):
                 for p, c in got:
                     calls.append(("", "write_file", {"path": p, "content": c}))
         if not calls:
-            visible = _TOOL_TAG.sub("", acc).strip()
+            visible = _BARE_CALL.sub("", _TOOL_TAG.sub("", acc)).strip()
             return {"text": visible or acc.strip(), "events": events}
         convo.append({"role": "assistant", "content": acc})
         for match, name, args in calls[:1]:
-            try:
-                result = TOOLS[name](**args)
-            except Exception as e:
-                result = "Error: %s" % e
+            result = _execute(name, args)
             emit("tool", name=name, args=args, result=result)
             convo.append({"role": "user", "content": "Tool result: [%s]\n%s" % (name, result)})
     return {"text": "Stopped after %d steps." % max_steps, "events": events}

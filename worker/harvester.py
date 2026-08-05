@@ -40,7 +40,7 @@ async def _extract_token(page, ctx) -> str:
 
 async def harvest_one() -> bool:
     """Sign up one account, bank its token + session + proxy. Returns success."""
-    proxy = proxies.next_proxy()                 # this account's birth-IP
+    proxy = proxies.next_proxy()
     async with async_playwright() as p:
         browser, ctx = await _new_context(p, proxy=proxy)
         try:
@@ -48,8 +48,6 @@ async def harvest_one() -> bool:
             await page.goto(config.TARGET_URL, wait_until="domcontentloaded")
             await _switch_model(page, "default")
             email = await _signup(page)
-            # NOTE: do NOT send a prompt here. The account's ONE free message must
-            # stay unspent so a real request can claim and use it later.
             token = await _extract_token(page, ctx)
 
             os.makedirs(config.STORAGE_STATE_DIR, exist_ok=True)
@@ -78,8 +76,6 @@ async def top_up() -> int:
     if batch <= 0:
         return 0
 
-    # Tor's NEWNYM is global -> harvest sequentially, new exit IP per account,
-    # spaced out to respect Tor's circuit rate limit.
     if config.PROXY_TOR:
         ok = 0
         for i in range(batch):

@@ -20,9 +20,9 @@ class Health:
     def __init__(self):
         self._lock = threading.Lock()
         self.counters = defaultdict(int)
-        self.harvest_window = deque(maxlen=50)   # recent harvest outcomes (bool)
-        self.send_window = deque(maxlen=50)      # recent message outcomes (bool)
-        self.errors = deque(maxlen=20)           # recent error detail (newest first)
+        self.harvest_window = deque(maxlen=50)
+        self.send_window = deque(maxlen=50)
+        self.errors = deque(maxlen=20)
         self.last_harvest_ok = None
         self.last_send_ok = None
 
@@ -78,8 +78,6 @@ class Health:
             }
 
     def _diagnose(self, fresh, hr, sr):
-        # Headless WS path: no bank, no Tor, no browser harvest. Health follows the
-        # direct send-success rate only. (Bank-empty / Tor checks are browser-path.)
         if getattr(config, "DIRECT_WS_ENABLED", False):
             status, reasons = "ok", []
             n = len(self.send_window)
@@ -124,5 +122,4 @@ class Health:
         return status, reasons
 
 
-# single shared instance
 H = Health()

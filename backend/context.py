@@ -5,10 +5,8 @@ so we stuff prior turns into every new prompt to fake continuity.
 from collections import defaultdict
 from typing import Dict, List
 
-# sessionId -> [{"role": "user"/"assistant", "content": str}, ...]
 _STORE: Dict[str, List[dict]] = defaultdict(list)
 
-# rough char budget for the stuffed prompt (keep under the target's input cap)
 MAX_HISTORY_CHARS = 6000
 
 
