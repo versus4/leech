@@ -25,7 +25,7 @@ needed.
 
 ## Models
 
-Claude Opus 5 / 4.8, Sonnet 5, GPT-5.6 Sol, GPT-5.5, GPT-5.4, Gemini 3.6 Flash,
+Claude Fable 5, Opus 5 / 4.8, Sonnet 5, GPT-5.6 Sol, GPT-5.5, GPT-5.4, Gemini 3.6 Flash,
 DeepSeek V4 Pro, Kimi K2.6, Grok 4.5, GLM 5.2. See `worker/config.py` for the
 full list. Default: `gpt-5-6-sol`. The aliases `default`, `fast` and `smart` also
 work as model ids.

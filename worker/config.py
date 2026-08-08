@@ -33,6 +33,7 @@ SIGNUP_MAX_RETRIES = 5
 DEFAULT_MODEL = "gpt-5-6-sol"
 
 MODELS = [
+    {"slug": "claude-fable-5",           "label": "Claude Fable 5"},
     {"slug": "claude-opus-5",            "label": "Claude Opus 5"},
     {"slug": "claude-opus-4-8",          "label": "Claude Opus 4.8"},
     {"slug": "claude-sonnet-5",          "label": "Claude Sonnet 5"},
@@ -50,13 +51,13 @@ PREFERRED_DEFAULTS = ["gpt-5-6-sol", "claude-sonnet-5", "gpt-5-5"]
 ALIAS_PREFERENCES = {
     "default": PREFERRED_DEFAULTS,
     "fast":    ["gemini-3-6-flash", "deepseek-v4-flash", "gpt-5-4"],
-    "smart":   ["claude-opus-5", "claude-opus-4-8", "gpt-5-6-sol"],
+    "smart":   ["claude-fable-5", "claude-opus-5", "claude-opus-4-8", "gpt-5-6-sol"],
 }
 
 MODEL_ALIASES = {
     "default": "gpt-5-6-sol",
     "fast":    "gemini-3-6-flash",
-    "smart":   "claude-opus-5",
+    "smart":   "claude-fable-5",
 }
 
 _MODEL_SLUGS = {m["slug"] for m in MODELS}

@@ -16,11 +16,8 @@ from . import config
 
 log = logging.getLogger("catalog")
 
-BLACKLIST = {
-    "claude-fable-5",
-}
+BLACKLIST = set()
 BLACKLIST_PATTERNS = [
-    re.compile(r"^claude-fable-"),
     re.compile(r"(?:^|-)(?:embed|embedding|tts|whisper|moderation|rerank)(?:-|$)"),
 ]
 
