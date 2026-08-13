@@ -42,6 +42,7 @@ MODELS = [
     {"slug": "gpt-5-4",                  "label": "OpenAI GPT-5.4"},
     {"slug": "gemini-3-6-flash",         "label": "Gemini 3.6 Flash"},
     {"slug": "deepseek-v4-pro",          "label": "DeepSeek V4 Pro"},
+    {"slug": "kimi-k3",                  "label": "Kimi K3"},
     {"slug": "kimi-k2-6",                "label": "Kimi K2.6"},
     {"slug": "grok-4-5",                 "label": "Grok 4.5"},
     {"slug": "glm-5-2",                  "label": "GLM 5.2"},
